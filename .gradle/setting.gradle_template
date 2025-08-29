@@ -1,0 +1,37 @@
+pluginManagement {
+    repositories {
+        maven {
+            credentials {
+                username "${mavenRepoUser}"
+                password "${mavenRepoPassword}"
+            }
+            url "${mavenRepoUrl}/artifactory/mvn-all-virtual"
+        }
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            credentials {
+                username "${mavenRepoUser}"
+                password "${mavenRepoPassword}"
+            }
+            url "${mavenRepoUrl}/artifactory/mvn-all-virtual"
+        }
+    }
+}
+
+buildscript {
+    def baseProperties = new Properties()
+    def basePropertiesFile = "~/.gradle/gradle.properties"
+
+    if (file(basePropertiesFile).exists()) {
+        baseProperties.load(new FileInputStream(basePropertiesFile))
+    }
+    baseProperties.each {
+        rootProject.set(it.key, it.value)
+    }
+}
+
+rootProject.name = 'TODO'
