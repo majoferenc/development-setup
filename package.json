@@ -1,0 +1,29 @@
+{
+  "name": "lib",
+  "dependencies": {
+    "@angular/cli": {
+      "version": "20.2.1",
+      "overridden": false
+    },
+    "@grafana/openapi-to-k6": {
+      "version": "0.3.0",
+      "overridden": false
+    },
+    "corepack": {
+      "version": "0.17.2",
+      "overridden": false
+    },
+    "npm": {
+      "version": "9.6.6",
+      "overridden": false
+    },
+    "pnpm": {
+      "version": "8.5.1",
+      "overridden": false
+    },
+    "serve": {
+      "version": "14.2.4",
+      "overridden": false
+    }
+  }
+}
