@@ -1,0 +1,240 @@
+// used plugins
+plugins {
+    id "org.sonarqube" version "6.1.0.5360"
+    id "jacoco"
+    id 'java'
+    id 'maven-publish'
+    id "org.springframework.boot" version "3.4.5"
+    id "io.spring.dependency-management" version "1.1.7"
+    id "com.google.cloud.tools.jib" version "3.4.5"
+    id "com.github.johnrengelman.shadow" version "8.1.1"
+    id "com.github.jmongard.git-semver-plugin" version "0.16.0"
+    id "se.ascp.gradle.gradle-versions-filter" version "0.1.16"
+}
+
+ext {
+    set('springCloudVersion', "2024.0.1")
+}
+
+// artifact definition
+group = "${group}"
+version = semver.version
+description = "${description}"
+
+
+// used dependencies
+dependencies {
+    // Spring Boot
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+    // Needed only for ARM based machines, will be not included for x86/64 builds
+    if (System.getProperty("os.arch").equalsIgnoreCase("aarch64")) {
+        println("Using ARM version of netty")
+        implementation('io.netty:netty-resolver-dns-native-macos:4.1.112.Final') {
+            artifact {
+                classifier = "osx-aarch_64"
+            }
+        }
+    }
+
+    // Database
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test:3.4.5'
+    testImplementation 'org.springframework.security:spring-security-test:6.4.5'
+    testImplementation 'com.maciejwalkowiak.spring:wiremock-spring-boot:2.1.3'
+    testImplementation group: 'org.awaitility', name: 'awaitility', version: '4.2.1'
+    implementation 'org.openapitools:jackson-databind-nullable:0.2.6'
+    testImplementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    testImplementation 'org.testcontainers:junit-jupiter:1.21.0'
+    testImplementation 'com.github.dasniko:testcontainers-keycloak:2.1.2'
+    testImplementation 'org.instancio:instancio-junit:5.4.1'
+
+    // Swagger
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6'
+    implementation 'io.swagger.core.v3:swagger-annotations:2.2.30'
+
+    // Metrics
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus:1.12.0'
+
+    // Keycloak
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
+    // otlp tracing
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.38'
+    annotationProcessor 'org.projectlombok:lombok:1.18.38'
+    testCompileOnly 'org.projectlombok:lombok:1.18.38'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.38'
+
+    //Mapstruct
+    implementation 'org.mapstruct:mapstruct:1.6.3'
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
+    testAnnotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
+//***************************Project configuration starts here***************************
+
+// define the class path
+sourceSets {
+    main {
+        java { srcDirs = ['src/main/java', 'build/generated/sources/annotationProcessor/java/main'] }
+        resources { srcDir 'src/main/resources' }
+    }
+}
+
+// Creating Jar file
+def mainClassName = "$group" + "." + "TODO"
+
+bootJar {
+    mainClassName = "$mainClassName".toString()
+}
+
+
+import java.text.SimpleDateFormat
+
+jar {
+    manifest {
+        attributes "Implementation-Title": "${applicationName}"
+        attributes "Implementation-Version": semver.version
+
+        // build date
+        def dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'")
+        def buildDate = dateFormat.format(new Date())
+        attributes "Build-Date": "${buildDate}"
+        attributes "Description": "${description}"
+    }
+}
+
+
+// JUnit testing
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+compileJava {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    options.compilerArgs += [
+            '-Amapstruct.defaultComponentModel=spring'
+    ]
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+build.dependsOn shadowJar
+build.dependsOn bootJar
+
+processResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register("bootRunDev") {
+    group = "application"
+    description = "Runs this project as a Spring Boot application with the test profile"
+    doFirst {
+        tasks.bootRun.configure {
+            systemProperty("spring.profiles.active", "test")
+        }
+    }
+    finalizedBy("bootRun")
+}
+
+clean.doFirst {
+    delete "${rootDir}/database/"
+    delete "${rootDir}/bin/"
+    delete "${rootDir}/database-test"
+}
+
+/**
+ * Google JIB Configuration
+ */
+jib {
+    containerizingMode = 'packaged'
+    from {
+        image = (System.getenv('CI_JIB_BASEIMAGE') ?: project.property('applicationBaseImage')).toString()
+        auth {
+            username = (System.getenv('CI_REGISTRY_USER') ?: project.property('mavenRepoUser')).toString()
+            password = (System.getenv('CI_REGISTRY_PASSWORD') ?: project.property('mavenRepoPassword')).toString()
+        }
+    }
+
+    to {
+        image = String.format("%s/%s:%s",
+                (System.getenv('CI_REGISTRY') ?: project.property('registryName')).toString(),
+                (System.getenv('CI_IMAGE_IMAGE') ?: project.property('applicationName')).toString(),
+                (System.getenv('CI_IMAGE_TAG') ?: semver.version).toString())
+        auth {
+            username = (System.getenv('CI_REGISTRY_USER') ?: project.property('mavenRepoUser')).toString()
+            password = (System.getenv('CI_REGISTRY_PASSWORD') ?: project.property('mavenRepoPassword')).toString()
+        }
+    }
+    outputPaths {
+        tar = String.format(System.getenv('CI_PROJECT_NAME') ? "build/%s-%s-%s.tar" : "build/%s-%s.tar",
+                (System.getenv('CI_PROJECT_NAME') ?: project.property('projectName')).toString(),
+                (System.getenv('CI_COMMIT_REF_SLUG') ?: semver.version).toString(),
+                (System.getenv('CI_COMMIT_SHORT_SHA') ?: '').toString())
+    }
+}
+
+
+
+// Build manifest configuration
+springBoot {
+    buildInfo {
+        properties {
+            def apiDependency = ""
+            for (element in project.configurations.implementation.allDependencies) {
+                if (element.group.toString().startsWith("TODO")) {
+                    apiDependency += "$element.name:$element.version, "
+                }
+            }
+
+            additional = ["APIDependency": "${apiDependency}".toString(), "semVersion": "${semver.semVersion}"]
+        }
+    }
+}
+sonar {
+    properties {
+        def modifiedGroup = project.group.replaceAll(/\./, '/')
+        def mainClassFileName = mainClassName.replaceFirst(project.group + '.', "")
+
+        property "sonar.coverage.exclusions", "**/${modifiedGroup}/config/**,**/${modifiedGroup}/gateway/**,**/${modifiedGroup}/model/**,**/${modifiedGroup}/${mainClassFileName}.*"
+        property "sonar.projectKey", "TODO-${applicationName}"
+        property "sonar.qualitygate.wait", true
+    }
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        csv.required = false
+        html.outputLocation = layout.buildDirectory.dir('jacocoHtml')
+    }
+
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            def modifiedGroup = project.group.replaceAll(/\./, '/')
+            def mainClassFileName = mainClassName.replaceFirst(project.group + '.', "")
+
+            fileTree(dir: it, exclude: [
+                    "**/${modifiedGroup}/config/**",
+                    "**/${modifiedGroup}/gateway/**",
+                    "**/${modifiedGroup}/model/**",
+                    "**/${modifiedGroup}/${mainClassFileName}.*"
+            ])
+        }))
+    }
+}
+
